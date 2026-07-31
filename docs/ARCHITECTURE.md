@@ -17,21 +17,28 @@ possible interface among future web, dashboard, and other interfaces.
 - **Company** (`core.company`) coordinates employees and publishes lifecycle
   events when it starts and stops.
 - **Application** (`application.py`) is the composition root: it creates the
-  `EventBus` and `Company`, and owns application startup and shutdown.
+  `EventBus` and `Company`, injects application settings, and owns application
+  startup and shutdown.
+- **Config** (`config`) is an infrastructure layer that validates environment
+  settings without introducing configuration dependencies into `core`.
 
 ## Dependency direction
 
 The current dependency direction is:
 
 ```text
-entry point (__main__) → Application → core (Company, EventBus, Event, Employee)
-tests ────────────────────────────────────────────────────────────────┘
+entry point (__main__) → Application → config (Settings)
+                              │
+                              └──────→ core (Company, EventBus, Event, Employee)
+tests ────────────────────────────────────────────────────────────────────────┘
 ```
 
-`Application` assembles concrete dependencies. Domain code must remain
-independent of delivery interfaces and infrastructure. Future interfaces and
-integration adapters may depend inward on application services and core; core
-must not depend outward on Telegram, databases, or concrete AI SDKs.
+`Application` loads or receives settings and assembles concrete dependencies.
+The `config` layer is infrastructure and is never imported by `core`. Domain
+code must remain independent of delivery interfaces and infrastructure. Future
+interfaces and integration adapters may depend inward on application services
+and core; core must not depend outward on Telegram, databases, or concrete AI
+SDKs.
 
 ## Why core has no interface dependencies
 
@@ -69,5 +76,6 @@ The intended structure reserves space for:
 - `database` for persistence and migrations;
 - additional interface and infrastructure adapters as the product grows.
 
-These layers are architectural boundaries only; Issue #002 does not implement
-them or add any of their dependencies.
+These layers are architectural boundaries only; Issues #001 and #002 did not
+implement them or add any of their dependencies. Issue #003 adds only the
+infrastructure `config` layer described above.

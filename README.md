@@ -36,6 +36,23 @@ uv run freelance-agents
 The application starts the company, prints a confirmation, and exits without
 running a background loop.
 
+## Configuration
+
+The application uses `FA_`-prefixed environment variables and can read an
+optional local `.env` file. Start from the safe example:
+
+```bash
+cp .env.example .env
+```
+
+The main variables are `FA_APP_NAME`, `FA_ENVIRONMENT`, `FA_DEBUG`,
+`FA_LOG_LEVEL`, `FA_DATABASE_URL`, `FA_TELEGRAM_BOT_TOKEN`, `FA_AI_API_KEY`,
+`FA_AI_BASE_URL`, and `FA_AI_MODEL`.
+
+Telegram and AI settings are placeholders for future integrations. Their
+values may remain empty for the current MVP. Never commit real keys, tokens,
+or passwords; `.env` files are ignored by Git.
+
 ## Development
 
 Run the tests:
@@ -57,6 +74,7 @@ uv run ruff format --check .
 src/freelance_agents/
 ├── __main__.py          # CLI entry point
 ├── application.py       # dependency composition and lifecycle
+├── config/              # environment-backed infrastructure settings
 └── core/
     ├── company.py       # company aggregate
     ├── employees/       # employee model and status

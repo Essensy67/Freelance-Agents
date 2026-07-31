@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "An asynchronous foundation for a virtual freelance company"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic-settings>=2.14.2",
+]
 
 [project.scripts]
 freelance-agents = "freelance_agents.__main__:main"
