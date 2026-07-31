@@ -33,8 +33,9 @@ Or use the installed console command:
 uv run freelance-agents
 ```
 
-The application starts the company, prints a confirmation, and exits without
-running a background loop.
+The current one-shot MVP logs its safe startup configuration, starts the
+company, and always shuts it down before exiting. During the lifecycle,
+`SIGINT` and `SIGTERM` request orderly cancellation and cleanup.
 
 ## Configuration
 
@@ -52,6 +53,10 @@ The main variables are `FA_APP_NAME`, `FA_ENVIRONMENT`, `FA_DEBUG`,
 Telegram and AI settings are placeholders for future integrations. Their
 values may remain empty for the current MVP. Never commit real keys, tokens,
 or passwords; `.env` files are ignored by Git.
+
+`FA_LOG_LEVEL` controls standard-library logging and accepts `DEBUG`, `INFO`,
+`WARNING`, or `ERROR`. Startup logs contain only the safe settings summary:
+secret values are replaced by boolean configured/not-configured indicators.
 
 ## Development
 
@@ -75,6 +80,7 @@ src/freelance_agents/
 ├── __main__.py          # CLI entry point
 ├── application.py       # dependency composition and lifecycle
 ├── config/              # environment-backed infrastructure settings
+├── logging_config.py    # standard logging setup
 └── core/
     ├── company.py       # company aggregate
     ├── employees/       # employee model and status

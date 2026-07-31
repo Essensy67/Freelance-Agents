@@ -17,20 +17,26 @@ possible interface among future web, dashboard, and other interfaces.
 - **Company** (`core.company`) coordinates employees and publishes lifecycle
   events when it starts and stops.
 - **Application** (`application.py`) is the composition root: it creates the
-  `EventBus` and `Company`, injects application settings, and owns application
-  startup and shutdown.
+  `EventBus` and `Company`, injects application settings, configures logging,
+  and guarantees application startup and shutdown.
 - **Config** (`config`) is an infrastructure layer that validates environment
   settings without introducing configuration dependencies into `core`.
+- **CLI** (`__main__.py`) translates `SIGINT` and `SIGTERM` into cancellation
+  of the active application lifecycle and removes its handlers on exit.
+- **Logging configuration** (`logging_config.py`) configures Python logging
+  from `Settings.log_level`; startup diagnostics use `Settings.safe_summary()`.
 
 ## Dependency direction
 
 The current dependency direction is:
 
 ```text
-entry point (__main__) → Application → config (Settings)
-                              │
-                              └──────→ core (Company, EventBus, Event, Employee)
-tests ────────────────────────────────────────────────────────────────────────┘
+entry point (__main__) ──signals──→ Application → config (Settings)
+                                         │          ↑
+                                         │     logging config
+                                         ↓
+                                core (Company, EventBus, Event, Employee)
+tests ──────────────────────────────────────────────────────────────────┘
 ```
 
 `Application` loads or receives settings and assembles concrete dependencies.
@@ -56,8 +62,10 @@ uv run python -m freelance_agents
 uv run freelance-agents
 ```
 
-The application starts the company, prints a confirmation, and exits; there is
-currently no background loop or long-running interface.
+The application logs a secret-safe startup summary, starts the company, and
+guarantees shutdown in a `finally` block before exiting. The CLI handles
+`SIGINT` and `SIGTERM` during this lifecycle. There is currently no background
+loop or long-running interface.
 
 ## Issue #001 boundary
 
@@ -78,4 +86,5 @@ The intended structure reserves space for:
 
 These layers are architectural boundaries only; Issues #001 and #002 did not
 implement them or add any of their dependencies. Issue #003 adds only the
-infrastructure `config` layer described above.
+infrastructure `config` layer described above; Issue #004 adds logging and
+orderly application lifecycle handling without introducing integrations.
