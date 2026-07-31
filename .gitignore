@@ -13,3 +13,9 @@ wheels/
 .env
 .env.*
 !.env.example
+
+# Local SQLite state
+data/*.db
+data/*.db-*
+*.sqlite
+*.sqlite3

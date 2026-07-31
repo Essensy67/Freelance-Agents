@@ -33,9 +33,10 @@ Or use the installed console command:
 uv run freelance-agents
 ```
 
-The current one-shot MVP logs its safe startup configuration, starts the
-company, and always shuts it down before exiting. During the lifecycle,
-`SIGINT` and `SIGTERM` request orderly cancellation and cleanup.
+The current one-shot MVP initializes and health-checks its database, logs its
+safe startup configuration, starts the company, and always shuts down both the
+company and database engine before exiting. During the lifecycle, `SIGINT` and
+`SIGTERM` request orderly cancellation and cleanup.
 
 ## Configuration
 
@@ -57,6 +58,31 @@ or passwords; `.env` files are ignored by Git.
 `FA_LOG_LEVEL` controls standard-library logging and accepts `DEBUG`, `INFO`,
 `WARNING`, or `ERROR`. Startup logs contain only the safe settings summary:
 secret values are replaced by boolean configured/not-configured indicators.
+Passwords embedded in database URLs are masked.
+
+## Database
+
+Persistence uses SQLAlchemy 2.x asynchronous APIs and SQLite through
+`aiosqlite`. The default `FA_DATABASE_URL` stores state in
+`data/freelance_agents.db`; local SQLite files are ignored by Git. Infrastructure
+repositories provide create, read, update, and list operations for employees,
+freelance orders, projects, conversations, messages, and project events.
+
+Apply the versioned schema migration with:
+
+```bash
+uv run alembic upgrade head
+```
+
+Inspect the current revision or roll the schema back with:
+
+```bash
+uv run alembic current
+uv run alembic downgrade base
+```
+
+Alembic reads the same `FA_DATABASE_URL` setting as the application. Private
+message bodies and database credentials are not written to application logs.
 
 ## Development
 
@@ -80,6 +106,7 @@ src/freelance_agents/
 ├── __main__.py          # CLI entry point
 ├── application.py       # dependency composition and lifecycle
 ├── config/              # environment-backed infrastructure settings
+├── database/            # async models, engine lifecycle, repositories
 ├── logging_config.py    # standard logging setup
 └── core/
     ├── company.py       # company aggregate
@@ -87,4 +114,5 @@ src/freelance_agents/
     └── events/          # event model and asynchronous event bus
 tests/                   # unit tests
 docs/tasks/              # task scope and acceptance criteria
+migrations/              # Alembic schema revisions
 ```

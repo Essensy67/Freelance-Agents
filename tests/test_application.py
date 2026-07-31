@@ -57,7 +57,11 @@ class SignalLoop:
 
 def make_settings(**overrides: object) -> Settings:
     """Create settings isolated from local dotenv files."""
-    return Settings(_env_file=None, **overrides)
+    return Settings(
+        _env_file=None,
+        database_url="sqlite+aiosqlite:///:memory:",
+        **overrides,
+    )
 
 
 async def test_application_logs_start_and_always_stops(
@@ -86,6 +90,7 @@ async def test_application_logs_start_and_always_stops(
         "company.stopped",
     ]
     assert application.company.is_running is False
+    assert application.database.is_initialized is False
     assert "Starting application with settings" in caplog.text
     assert "started successfully" in caplog.text
     assert "stopped successfully" in caplog.text

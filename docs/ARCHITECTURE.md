@@ -25,6 +25,10 @@ possible interface among future web, dashboard, and other interfaces.
   of the active application lifecycle and removes its handlers on exit.
 - **Logging configuration** (`logging_config.py`) configures Python logging
   from `Settings.log_level`; startup diagnostics use `Settings.safe_summary()`.
+- **Database** (`database`) is an asynchronous SQLAlchemy infrastructure layer
+  containing the engine/session lifecycle, transaction boundaries, ORM models,
+  and repositories for durable company and project state.
+- **Migrations** (`migrations`) version the database schema through Alembic.
 
 ## Dependency direction
 
@@ -32,19 +36,20 @@ The current dependency direction is:
 
 ```text
 entry point (__main__) ──signals──→ Application → config (Settings)
-                                         │          ↑
-                                         │     logging config
+                                         ├──────→ logging config
+                                         ├──────→ database → SQLAlchemy/SQLite
                                          ↓
                                 core (Company, EventBus, Event, Employee)
 tests ──────────────────────────────────────────────────────────────────┘
 ```
 
 `Application` loads or receives settings and assembles concrete dependencies.
-The `config` layer is infrastructure and is never imported by `core`. Domain
-code must remain independent of delivery interfaces and infrastructure. Future
-interfaces and integration adapters may depend inward on application services
-and core; core must not depend outward on Telegram, databases, or concrete AI
-SDKs.
+The `config` and `database` layers are infrastructure and are never imported by
+`core`. Repository transaction boundaries commit successful session contexts
+and roll back exceptions. Domain code remains independent of delivery
+interfaces and infrastructure. Future interfaces and integration adapters may
+depend inward on application services and core; core must not depend outward on
+Telegram, databases, SQLAlchemy, or concrete AI SDKs.
 
 ## Why core has no interface dependencies
 
@@ -62,10 +67,23 @@ uv run python -m freelance_agents
 uv run freelance-agents
 ```
 
-The application logs a secret-safe startup summary, starts the company, and
-guarantees shutdown in a `finally` block before exiting. The CLI handles
-`SIGINT` and `SIGTERM` during this lifecycle. There is currently no background
-loop or long-running interface.
+The application initializes and health-checks persistence, logs a secret-safe
+startup summary, starts the company, and guarantees company and database
+shutdown in a `finally` block before exiting. The CLI handles `SIGINT` and
+`SIGTERM` during this lifecycle. There is currently no background loop or
+long-running interface.
+
+## Persistence model
+
+Infrastructure ORM models persist employees, freelance orders, projects,
+conversations, private messages, and project events. They use UUID identifiers,
+UTC timestamps, explicit status/role/event enums, and relational foreign keys.
+These are persistence records rather than domain objects; future services may
+map between them and core models without introducing outward core dependencies.
+
+The application currently initializes the metadata for a new local database.
+Alembic revision `20260731_0001` provides the equivalent versioned initial
+schema for managed environments and supports downgrade to an empty schema.
 
 ## Issue #001 boundary
 
@@ -87,4 +105,6 @@ The intended structure reserves space for:
 These layers are architectural boundaries only; Issues #001 and #002 did not
 implement them or add any of their dependencies. Issue #003 adds only the
 infrastructure `config` layer described above; Issue #004 adds logging and
-orderly application lifecycle handling without introducing integrations.
+orderly application lifecycle handling without introducing integrations. Issue
+#005 adds asynchronous persistence and migrations while keeping SQLAlchemy out
+of `core`.

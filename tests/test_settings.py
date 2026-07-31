@@ -141,6 +141,21 @@ def test_safe_summary_does_not_expose_secrets() -> None:
     assert api_secret not in repr(summary)
 
 
+def test_safe_summary_masks_database_password() -> None:
+    password = "database-password"
+    settings = load_settings(
+        _env_file=None,
+        database_url=f"postgresql+asyncpg://worker:{password}@db.example/app",
+    )
+
+    summary = settings.safe_summary()
+
+    assert password not in repr(summary)
+    assert summary["database_url"] == (
+        "postgresql+asyncpg://worker:**********@db.example/app"
+    )
+
+
 def test_secret_str_masks_values_in_repr() -> None:
     secret = "never-show-this"
     settings = load_settings(_env_file=None, ai_api_key=secret)
