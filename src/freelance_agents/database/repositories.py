@@ -16,6 +16,7 @@ from freelance_agents.database.models import (
     ProjectEventModel,
     ProjectModel,
     ProjectTaskModel,
+    ProviderCallModel,
 )
 
 
@@ -143,3 +144,9 @@ class ProjectTaskRepository(Repository[ProjectTaskModel]):
             .order_by(self.model.position)
         )
         return list((await self.session.scalars(statement)).all())
+
+
+class ProviderCallRepository(Repository[ProviderCallModel]):
+    """Persist AI completion provider call records."""
+
+    model = ProviderCallModel

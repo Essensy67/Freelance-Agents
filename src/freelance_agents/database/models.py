@@ -91,6 +91,15 @@ class ProjectTaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ProviderCallStatus(StrEnum):
+    """Persisted outcome of one AI completion provider call."""
+
+    SUCCESS = "success"
+    RATE_LIMITED = "rate_limited"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
 class TimestampedModel:
     """Provide UUID identity and UTC timestamps to persisted records."""
 
@@ -267,6 +276,33 @@ class ProjectTaskModel(TimestampedModel, Base):
         nullable=True,
     )
     depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+
+class ProviderCallModel(TimestampedModel, Base):
+    """Persist one AI completion provider call without its prompt/response body."""
+
+    __tablename__ = "provider_calls"
+
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(200))
+    status: Mapped[ProviderCallStatus] = mapped_column(
+        Enum(
+            ProviderCallStatus,
+            native_enum=False,
+            validate_strings=True,
+            create_constraint=True,
+            name="provider_call_status",
+        )
+    )
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    estimated_cost: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 6), nullable=True
+    )
+    error_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 Index("ix_projects_order_id", ProjectModel.order_id)

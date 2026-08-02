@@ -21,6 +21,8 @@ ENVIRONMENT_VARIABLES = (
     "FA_AI_API_KEY",
     "FA_AI_BASE_URL",
     "FA_AI_MODEL",
+    "FA_AI_TIMEOUT_SECONDS",
+    "FA_AI_MAX_RETRIES",
 )
 
 
@@ -45,6 +47,8 @@ def test_settings_defaults() -> None:
     assert settings.ai_api_key is None
     assert settings.ai_base_url is None
     assert settings.ai_model is None
+    assert settings.ai_timeout_seconds == 30.0
+    assert settings.ai_max_retries == 2
 
 
 def test_settings_accept_direct_arguments() -> None:
@@ -59,6 +63,8 @@ def test_settings_accept_direct_arguments() -> None:
         ai_api_key="ai-secret",
         ai_base_url="https://api.example.com/v1",
         ai_model="example-model",
+        ai_timeout_seconds=15.0,
+        ai_max_retries=5,
     )
 
     assert settings.app_name == "Direct Company"
@@ -70,6 +76,8 @@ def test_settings_accept_direct_arguments() -> None:
     assert settings.ai_api_key == SecretStr("ai-secret")
     assert str(settings.ai_base_url) == "https://api.example.com/v1"
     assert settings.ai_model == "example-model"
+    assert settings.ai_timeout_seconds == 15.0
+    assert settings.ai_max_retries == 5
 
 
 def test_settings_read_prefixed_environment_variables(

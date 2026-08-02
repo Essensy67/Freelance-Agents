@@ -49,6 +49,25 @@ possible interface among future web, dashboard, and other interfaces.
   from `core.workflow` records. `SqlAlchemyWorkflowTransactionManager.begin()`
   wraps one `Database.session()` call per unit of work, so a transaction
   boundary spans exactly one `OrderIntakeService` operation.
+- **Core provider types** (`core.providers`) are SQLAlchemy/SDK-free domain
+  types for AI completions (Issue #007): `CompletionRequest`/
+  `CompletionResponse`/`CompletionUsage`/`CompletionMessage` normalize a
+  completion call, `CompletionProvider` is the async port any future service
+  depends on, `ProviderError` and its subclasses are the typed failure
+  vocabulary, and `CostCalculator`/`ModelPricing` estimate cost from usage
+  and an injected pricing table (no hardcoded prices).
+- **Provider adapter** (`providers.openai_compatible`) implements
+  `CompletionProvider` over any OpenAI-compatible chat-completions HTTP API
+  using `httpx`. It validates its configuration eagerly, retries transient
+  failures (429/5xx/timeout/connection errors) with exponential backoff,
+  raises immediately on non-retryable 4xx responses, and never logs the API
+  key or message content.
+- **Provider call recorder** (`database.provider_calls`) is
+  `RecordingCompletionProvider`, a decorator that also implements
+  `CompletionProvider`. It times every call, estimates its cost, and
+  persists one `provider_calls` row per attempt (success or failure) without
+  storing prompt/response content; a persistence failure is logged and
+  swallowed so it never masks the underlying provider result or error.
 
 ## Dependency direction
 
@@ -60,27 +79,37 @@ entry point (__main__) ──signals──→ Application → config (Settings)
                                          ├──────→ database → SQLAlchemy/SQLite
                                          ├──────→ database.workflow → services.ports (adapter)
                                          ├──────→ services (OrderIntakeService) → core.workflow
+                                         ├──────→ providers.openai_compatible → httpx (adapter)
+                                         ├──────→ database.provider_calls → core.providers (adapter)
                                          ↓
-                                core (Company, EventBus, Event, Employee)
+                                core (Company, EventBus, Event, Employee, providers)
 tests ──────────────────────────────────────────────────────────────────┘
 ```
 
 `Application` loads or receives settings and assembles concrete dependencies,
 including `order_intake_service = OrderIntakeService(transactions=
-SqlAlchemyWorkflowTransactionManager(database), events=event_bus)`. The
-`config`, `database`, and `services` layers are infrastructure/application
-layers and are never imported by `core`. `services` depends inward on `core`
-only — it never imports `database` or SQLAlchemy, which lets
+SqlAlchemyWorkflowTransactionManager(database), events=event_bus)` and,
+when `ai_api_key`/`ai_base_url`/`ai_model` are all configured,
+`completion_provider = RecordingCompletionProvider(OpenAICompatibleProvider(...),
+database, CostCalculator(), provider_name="openai_compatible")`; otherwise
+`completion_provider` is `None` so the application still starts without AI
+credentials. The `config`, `database`, `services`, and `providers` layers
+are infrastructure/application layers and are never imported by `core`.
+`services` and `core.providers` depend inward on `core` only — neither
+imports `database`, `httpx`, or a concrete AI SDK, which lets
 `OrderIntakeService` run against the in-memory fakes in
-`tests/workflow_fakes.py`. `database.workflow` is the one place that depends
-on both `services.ports` (to implement them) and SQLAlchemy (to fulfil them),
-consistent with "adapters depend inward on services and core." Repository
-transaction boundaries commit successful session contexts and roll back
-exceptions; `SqlAlchemyWorkflowTransactionManager.begin()` uses the same
-`Database.session()` commit/rollback behavior. Domain code remains
-independent of delivery interfaces and infrastructure. Future interfaces
-depend inward on `services` and `core`; core must not depend outward on
-Telegram, databases, SQLAlchemy, or concrete AI SDKs.
+`tests/workflow_fakes.py` and lets any future consumer of
+`CompletionProvider` run against `tests/provider_fakes.py`.
+`database.workflow` and `database.provider_calls` are the two places that
+depend on both an application/core port (to implement it) and SQLAlchemy (to
+fulfil it), consistent with "adapters depend inward on services and core."
+Repository transaction boundaries commit successful session contexts and
+roll back exceptions; `SqlAlchemyWorkflowTransactionManager.begin()` uses the
+same `Database.session()` commit/rollback behavior, and
+`RecordingCompletionProvider` opens one such session per call it records.
+Domain code remains independent of delivery interfaces and infrastructure.
+Future interfaces depend inward on `services` and `core`; core must not
+depend outward on Telegram, databases, SQLAlchemy, or concrete AI SDKs.
 
 ## Why core has no interface dependencies
 
@@ -117,7 +146,8 @@ The application currently initializes the metadata for a new local database.
 Alembic revision `20260731_0001` provides the equivalent versioned initial
 schema for managed environments; revision `20260802_0002` adds the
 `freelance_orders.client_request_key` idempotency column and the
-`project_tasks` table. Both support downgrade back to an empty schema.
+`project_tasks` table; revision `20260802_0003` adds the `provider_calls`
+table. All three support downgrade back to an empty schema.
 
 ### Order intake and task workflow (Issue #006)
 
@@ -162,6 +192,42 @@ errors. Issue #014 may replace this direct-publish policy with an outbox.
 Published event payloads carry only IDs and statuses, never order titles,
 descriptions, or other private content.
 
+### AI provider calls and usage accounting (Issue #007)
+
+`provider_calls` stores one row per completion attempt: `id`, `created_at`,
+`updated_at`, `provider` (adapter name, e.g. `openai_compatible`), `model`,
+a constrained `status` (`success`/`rate_limited`/`timeout`/`error`),
+`prompt_tokens`/`completion_tokens`/`total_tokens`, `latency_ms`, a nullable
+`estimated_cost`, and nullable `error_type`/`error_message`. It never stores
+prompt or response text — only metadata, consistent with the redaction
+policy already applied to `project_events` payloads.
+
+`CompletionProvider` is the only type any future service (Issue #008's
+analysis service is the first consumer) depends on; nothing in `core` or
+`services` imports `httpx` or an AI SDK. `OpenAICompatibleProvider`
+(`providers.openai_compatible`) is the first concrete adapter: it validates
+`base_url`/`api_key` are non-blank at construction, retries 429/5xx/timeout/
+connection failures up to `Settings.ai_max_retries` times with exponential
+backoff (`Settings.ai_timeout_seconds` bounds each HTTP call), and raises
+immediately — without retrying — on 401/403 (`ProviderAuthenticationError`)
+or another non-retryable 4xx (`ProviderResponseError`). `RecordingCompletionProvider`
+(`database.provider_calls`) wraps any `CompletionProvider`, so recording is
+an orthogonal decorator rather than something each adapter implements itself;
+`Application` always composes the two together when AI settings are present.
+
+`CostCalculator` estimates cost from an explicit, injected
+`Mapping[str, ModelPricing]`; it has no built-in prices (real rates change
+and vary by deployment) and returns `None` for an unpriced model rather than
+guessing, so `provider_calls.estimated_cost` is honestly nullable. Issue
+#016 is where a durable, operator-managed price table belongs.
+
+`Settings` gained `ai_timeout_seconds` (default `30.0`) and `ai_max_retries`
+(default `2`); together with the existing `ai_api_key`/`ai_base_url`/
+`ai_model`, all three must be set for `Application.completion_provider` to
+be constructed — otherwise it is `None` and the application still starts,
+matching the existing "AI settings are optional placeholders for the
+current MVP" policy.
+
 ## Issue #001 boundary
 
 Issue #001 delivered the Python 3.13 `src` foundation, employee and company
@@ -176,12 +242,13 @@ The intended structure still reserves space for:
 
 - `app` for interface adapters and entry points (Telegram in Issue #012, an
   optional web UI in Issue #013);
-- provider adapters for AI completions (Issue #007);
-- additional infrastructure adapters as the product grows.
+- additional provider adapters and infrastructure adapters as the product
+  grows (Issue #018).
 
 `services` for application use cases now exists as of Issue #006, scoped to
-order intake and task workflow; later issues extend it rather than
-introducing a second use-case layer.
+order intake and task workflow; `providers`/`core.providers` for AI
+completions now exist as of Issue #007. Later issues extend these layers
+rather than introducing parallel ones.
 
 These layers are architectural boundaries only; Issues #001 and #002 did not
 implement them or add any of their dependencies. Issue #003 adds only the
@@ -191,4 +258,8 @@ Issue #005 adds asynchronous persistence and migrations while keeping
 SQLAlchemy out of `core`. Issue #006 adds the `services` application layer,
 `core.workflow` domain types, and `project_tasks` persistence, without adding
 provider credentials, decomposition, assignment, execution, approval, or any
-interface adapter — those remain scoped to Issues #007–#012.
+interface adapter. Issue #007 adds the `CompletionProvider` port, its
+OpenAI-compatible adapter, usage/cost persistence, and a fake for tests,
+without adding a business workflow that calls it, retry/queueing beyond the
+adapter's own policy, or a real pricing table — those remain scoped to
+Issues #008–#018.

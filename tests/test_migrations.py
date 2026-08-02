@@ -26,6 +26,7 @@ def test_initial_migration_upgrades_and_downgrades(
         "project_events",
         "project_tasks",
         "projects",
+        "provider_calls",
     }
     sync_engine.dispose()
 

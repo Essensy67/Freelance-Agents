@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     ai_api_key: SecretStr | None = None
     ai_base_url: AnyHttpUrl | None = None
     ai_model: str | None = None
+    ai_timeout_seconds: float = 30.0
+    ai_max_retries: int = 2
 
     @property
     def is_production(self) -> bool:
@@ -62,6 +64,8 @@ class Settings(BaseSettings):
             "database_url": _redact_url_password(self.database_url),
             "ai_base_url": str(self.ai_base_url) if self.ai_base_url else None,
             "ai_model": self.ai_model,
+            "ai_timeout_seconds": self.ai_timeout_seconds,
+            "ai_max_retries": self.ai_max_retries,
             "telegram_bot_token_configured": bool(
                 self.telegram_bot_token and self.telegram_bot_token.get_secret_value()
             ),
