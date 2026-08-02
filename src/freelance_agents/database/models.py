@@ -6,7 +6,18 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Enum, ForeignKey, Index, Numeric, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from freelance_agents.database.base import Base, UTCDateTime, utc_now
@@ -63,6 +74,23 @@ class ProjectEventType(StrEnum):
     COMPLETED = "completed"
 
 
+class ProjectTaskStatus(StrEnum):
+    """Persisted lifecycle states for one project task.
+
+    Mirrors ``core.workflow.statuses.TaskStatus``; the adapter in
+    ``database.workflow`` converts between the two by value.
+    """
+
+    RECEIVED = "received"
+    ACCEPTED = "accepted"
+    PLANNING = "planning"
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class TimestampedModel:
     """Provide UUID identity and UTC timestamps to persisted records."""
 
@@ -114,6 +142,7 @@ class FreelanceOrderModel(TimestampedModel, Base):
         default=OrderStatus.DRAFT,
     )
     budget: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    client_request_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class ProjectModel(TimestampedModel, Base):
@@ -205,7 +234,48 @@ class ProjectEventModel(TimestampedModel, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class ProjectTaskModel(TimestampedModel, Base):
+    """Persist one ordered unit of work belonging to a project."""
+
+    __tablename__ = "project_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "position", name="uq_project_tasks_project_position"
+        ),
+    )
+
+    project_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("projects.id")
+    )
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text, default="")
+    capability: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    position: Mapped[int] = mapped_column(Integer)
+    status: Mapped[ProjectTaskStatus] = mapped_column(
+        Enum(
+            ProjectTaskStatus,
+            native_enum=False,
+            validate_strings=True,
+            create_constraint=True,
+            name="project_task_status",
+        ),
+        default=ProjectTaskStatus.RECEIVED,
+    )
+    assigned_agent_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("agents.id"),
+        nullable=True,
+    )
+    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+
 Index("ix_projects_order_id", ProjectModel.order_id)
 Index("ix_conversations_project_id", ConversationModel.project_id)
 Index("ix_messages_conversation_id", MessageModel.conversation_id)
 Index("ix_project_events_project_id", ProjectEventModel.project_id)
+Index("ix_project_tasks_project_id", ProjectTaskModel.project_id)
+Index(
+    "ix_freelance_orders_client_request_key",
+    FreelanceOrderModel.client_request_key,
+    unique=True,
+)

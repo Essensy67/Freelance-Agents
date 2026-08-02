@@ -5,8 +5,9 @@ import logging
 from freelance_agents.config import Settings, load_settings
 from freelance_agents.core.company import Company
 from freelance_agents.core.events.bus import EventBus
-from freelance_agents.database import Database
+from freelance_agents.database import Database, SqlAlchemyWorkflowTransactionManager
 from freelance_agents.logging_config import configure_logging
+from freelance_agents.services import OrderIntakeService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ class Application:
         self.company = Company(
             name=self.settings.app_name,
             event_bus=self.event_bus,
+        )
+        self.order_intake_service = OrderIntakeService(
+            transactions=SqlAlchemyWorkflowTransactionManager(self.database),
+            events=self.event_bus,
         )
 
     async def run(self) -> None:

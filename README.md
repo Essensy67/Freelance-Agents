@@ -1,12 +1,15 @@
 # Freelance Agents
 
 Freelance Agents is an asynchronous Python foundation for a virtual company of
-specialized agents. The project is currently at the foundation stage of its MVP:
-it provides lifecycle models for a company and its employees plus a small
-in-process event bus.
+specialized agents. The project currently provides lifecycle models for a
+company and its employees, a small in-process event bus, asynchronous SQLite
+persistence with Alembic migrations, and an `OrderIntakeService` application
+service that accepts a client order and turns it into a project with a
+validated task plan (see "Order intake and task workflow" below).
 
-Issue #001 intentionally contains no freelance marketplace integrations,
-Telegram bot, AI agents, or database layer.
+The project intentionally contains no freelance marketplace integrations,
+Telegram bot, or AI provider calls yet; see `docs/tasks/ROADMAP.md` for the
+planned sequence.
 
 ## Requirements
 
@@ -66,7 +69,34 @@ Persistence uses SQLAlchemy 2.x asynchronous APIs and SQLite through
 `aiosqlite`. The default `FA_DATABASE_URL` stores state in
 `data/freelance_agents.db`; local SQLite files are ignored by Git. Infrastructure
 repositories provide create, read, update, and list operations for employees,
-freelance orders, projects, conversations, messages, and project events.
+freelance orders, projects, conversations, messages, project events, and
+ordered project tasks.
+
+## Order intake and task workflow
+
+`OrderIntakeService` (`freelance_agents.services`) is the first
+application-service vertical slice. It exposes four transport-neutral
+operations, used by `Application.order_intake_service` and available to any
+future interface without that interface touching SQLAlchemy or ORM models:
+
+- `receive_order(command)` — validates a title, description, and optional
+  budget, then creates an order, project, open conversation, and intake
+  event in one transaction. Repeating the same `request_key` with equivalent
+  content returns the original result instead of creating duplicates.
+- `create_plan(project_id, plan)` — replaces an unplanned project's task list
+  with a validated, ordered set of tasks; rejects blank titles, duplicate
+  task ids, and dangling dependency references.
+- `get_project_workflow(project_id)` — returns the current order/project
+  status and task list.
+- `transition_task(task_id, target_status)` — moves one task through
+  `received → accepted → planning → planned → in_progress → completed` (with
+  `failed`/`cancelled` reachable from any non-terminal state), rejecting
+  skipped states or a mutated terminal task.
+
+This service does not call an AI provider, assign employees, execute tasks,
+or accept approvals — those are Issues #007–#011. See
+`docs/ARCHITECTURE.md` for the transaction boundary and status-mapping
+details.
 
 Apply the versioned schema migration with:
 
@@ -105,13 +135,16 @@ uv run ruff format --check .
 src/freelance_agents/
 ├── __main__.py          # CLI entry point
 ├── application.py       # dependency composition and lifecycle
-├── config/              # environment-backed infrastructure settings
-├── database/            # async models, engine lifecycle, repositories
+├── config/               # environment-backed infrastructure settings
+├── database/             # async models, engine lifecycle, repositories,
+│                         # and the workflow ports adapter
 ├── logging_config.py    # standard logging setup
+├── services/             # OrderIntakeService, ports, and DTOs
 └── core/
     ├── company.py       # company aggregate
     ├── employees/       # employee model and status
-    └── events/          # event model and asynchronous event bus
+    ├── events/          # event model and asynchronous event bus
+    └── workflow/         # order-intake and task-lifecycle domain types
 tests/                   # unit tests
 docs/tasks/              # task scope and acceptance criteria
 migrations/              # Alembic schema revisions

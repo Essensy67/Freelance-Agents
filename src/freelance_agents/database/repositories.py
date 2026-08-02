@@ -10,10 +10,12 @@ from freelance_agents.database.base import Base, utc_now
 from freelance_agents.database.models import (
     AgentModel,
     ConversationModel,
+    ConversationStatus,
     FreelanceOrderModel,
     MessageModel,
     ProjectEventModel,
     ProjectModel,
+    ProjectTaskModel,
 )
 
 
@@ -77,17 +79,43 @@ class FreelanceOrderRepository(Repository[FreelanceOrderModel]):
 
     model = FreelanceOrderModel
 
+    async def get_by_client_request_key(
+        self, request_key: str
+    ) -> FreelanceOrderModel | None:
+        """Return the order created with a given idempotency key, if any."""
+        statement = select(self.model).where(
+            self.model.client_request_key == request_key
+        )
+        return await self.session.scalar(statement)
+
 
 class ProjectRepository(Repository[ProjectModel]):
     """Persist project records."""
 
     model = ProjectModel
 
+    async def get_by_order_id(self, order_id: UUID) -> ProjectModel | None:
+        """Return the project created for an order, if any."""
+        statement = select(self.model).where(self.model.order_id == order_id)
+        return await self.session.scalar(statement)
+
 
 class ConversationRepository(Repository[ConversationModel]):
     """Persist conversation records."""
 
     model = ConversationModel
+
+    async def get_open_for_project(self, project_id: UUID) -> ConversationModel | None:
+        """Return the open conversation for a project, if any."""
+        statement = (
+            select(self.model)
+            .where(
+                self.model.project_id == project_id,
+                self.model.status == ConversationStatus.OPEN,
+            )
+            .order_by(self.model.created_at)
+        )
+        return await self.session.scalar(statement)
 
 
 class MessageRepository(Repository[MessageModel]):
@@ -100,3 +128,18 @@ class ProjectEventRepository(Repository[ProjectEventModel]):
     """Persist project event records."""
 
     model = ProjectEventModel
+
+
+class ProjectTaskRepository(Repository[ProjectTaskModel]):
+    """Persist ordered project task records."""
+
+    model = ProjectTaskModel
+
+    async def list_by_project(self, project_id: UUID) -> list[ProjectTaskModel]:
+        """List a project's tasks in deterministic position order."""
+        statement = (
+            select(self.model)
+            .where(self.model.project_id == project_id)
+            .order_by(self.model.position)
+        )
+        return list((await self.session.scalars(statement)).all())
