@@ -174,6 +174,57 @@ async def test_process_signal_requests_shutdown(
     assert signal_loop.handlers == {}
 
 
+def test_application_has_no_completion_provider_without_ai_settings() -> None:
+    application = Application(settings=make_settings())
+
+    assert application.completion_provider is None
+
+
+def test_application_builds_and_closes_completion_provider_when_configured() -> None:
+    application = Application(
+        settings=make_settings(
+            ai_api_key="ai-secret",
+            ai_base_url="https://api.example.test",
+            ai_model="gpt-test",
+        )
+    )
+
+    assert application.completion_provider is not None
+
+
+async def test_application_closes_completion_provider_on_shutdown() -> None:
+    application = Application(
+        settings=make_settings(
+            ai_api_key="ai-secret",
+            ai_base_url="https://api.example.test",
+            ai_model="gpt-test",
+        )
+    )
+    await application.database.initialize()
+
+    await application.shutdown()
+
+    assert application.completion_provider is not None
+
+
+def test_application_has_no_analysis_service_without_ai_settings() -> None:
+    application = Application(settings=make_settings())
+
+    assert application.analysis_service is None
+
+
+def test_application_builds_analysis_service_when_configured() -> None:
+    application = Application(
+        settings=make_settings(
+            ai_api_key="ai-secret",
+            ai_base_url="https://api.example.test",
+            ai_model="gpt-test",
+        )
+    )
+
+    assert application.analysis_service is not None
+
+
 def test_logging_uses_configured_level() -> None:
     root_logger = logging.getLogger()
     original_level = root_logger.level

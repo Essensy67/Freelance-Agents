@@ -24,7 +24,9 @@ def test_initial_migration_upgrades_and_downgrades(
         "freelance_orders",
         "messages",
         "project_events",
+        "project_tasks",
         "projects",
+        "provider_calls",
     }
     sync_engine.dispose()
 

@@ -14,7 +14,12 @@ from freelance_agents.database.models import (
     ProjectEventType,
     ProjectModel,
     ProjectStatus,
+    ProjectTaskModel,
+    ProjectTaskStatus,
+    ProviderCallModel,
+    ProviderCallStatus,
 )
+from freelance_agents.database.provider_calls import RecordingCompletionProvider
 from freelance_agents.database.repositories import (
     AgentRepository,
     ConversationRepository,
@@ -22,7 +27,10 @@ from freelance_agents.database.repositories import (
     MessageRepository,
     ProjectEventRepository,
     ProjectRepository,
+    ProjectTaskRepository,
+    ProviderCallRepository,
 )
+from freelance_agents.database.workflow import SqlAlchemyWorkflowTransactionManager
 
 __all__ = [
     "AgentModel",
@@ -44,4 +52,12 @@ __all__ = [
     "ProjectModel",
     "ProjectRepository",
     "ProjectStatus",
+    "ProjectTaskModel",
+    "ProjectTaskRepository",
+    "ProjectTaskStatus",
+    "ProviderCallModel",
+    "ProviderCallRepository",
+    "ProviderCallStatus",
+    "RecordingCompletionProvider",
+    "SqlAlchemyWorkflowTransactionManager",
 ]
