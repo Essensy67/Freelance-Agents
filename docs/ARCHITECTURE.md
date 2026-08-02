@@ -38,17 +38,29 @@ possible interface among future web, dashboard, and other interfaces.
   `ConversationRecord`/`TaskRecord` are plain read-model records returned by
   repository ports.
 - **Services** (`services`) hosts `OrderIntakeService`, the first
-  application-service vertical slice (Issue #006). It depends only on the
-  `WorkflowTransactionManager`/`WorkflowUnitOfWork` and `EventPublisherPort`
-  protocols in `services.ports`, plus `core.workflow` types — never on
-  SQLAlchemy. `services.dto` holds its transport-neutral commands and
-  results (`OrderIntakeCommand`/`OrderIntakeResult`, `PlanCommand`/
-  `PlanResult`, `WorkflowSnapshot`).
+  application-service vertical slice (Issue #006), and `AnalysisService`
+  (Issue #008). Both depend only on the `WorkflowTransactionManager`/
+  `WorkflowUnitOfWork` and `EventPublisherPort` protocols in `services.ports`,
+  plus `core.workflow`/`core.analysis`/`core.providers` types — never on
+  SQLAlchemy. `services.dto` holds `OrderIntakeService`'s transport-neutral
+  commands and results (`OrderIntakeCommand`/`OrderIntakeResult`,
+  `PlanCommand`/`PlanResult`, `WorkflowSnapshot`); `AnalysisService` reuses
+  `PlanCommand`/`PlanResult` rather than duplicating them. `WorkflowUnitOfWork`
+  also bundles a `MessageRepositoryPort` (Issue #008) for appending private
+  conversation messages.
 - **Workflow adapter** (`database.workflow`) implements the `services.ports`
   protocols with the SQLAlchemy repositories, translating ORM models to and
   from `core.workflow` records. `SqlAlchemyWorkflowTransactionManager.begin()`
   wraps one `Database.session()` call per unit of work, so a transaction
-  boundary spans exactly one `OrderIntakeService` operation.
+  boundary spans exactly one service operation (or, for `AnalysisService`,
+  one read step or one write step — see below).
+- **Core analysis types** (`core.analysis`) are SQLAlchemy/httpx-free domain
+  types for order decomposition (Issue #008): `build_analysis_request`
+  builds a bounded, structured `CompletionRequest` from an order's title and
+  description, `parse_plan_response` fails closed on anything other than the
+  expected JSON task-array shape and resolves index-based dependencies into
+  `core.workflow.TaskInput` objects, and `AnalysisError`/
+  `AnalysisValidationError`/`AnalysisResponseError` are its typed errors.
 - **Core provider types** (`core.providers`) are SQLAlchemy/SDK-free domain
   types for AI completions (Issue #007): `CompletionRequest`/
   `CompletionResponse`/`CompletionUsage`/`CompletionMessage` normalize a
@@ -78,7 +90,8 @@ entry point (__main__) ──signals──→ Application → config (Settings)
                                          ├──────→ logging config
                                          ├──────→ database → SQLAlchemy/SQLite
                                          ├──────→ database.workflow → services.ports (adapter)
-                                         ├──────→ services (OrderIntakeService) → core.workflow
+                                         ├──────→ services (OrderIntakeService,
+                                         │         AnalysisService) → core.workflow, core.analysis
                                          ├──────→ providers.openai_compatible → httpx (adapter)
                                          ├──────→ database.provider_calls → core.providers (adapter)
                                          ↓
@@ -91,15 +104,20 @@ including `order_intake_service = OrderIntakeService(transactions=
 SqlAlchemyWorkflowTransactionManager(database), events=event_bus)` and,
 when `ai_api_key`/`ai_base_url`/`ai_model` are all configured,
 `completion_provider = RecordingCompletionProvider(OpenAICompatibleProvider(...),
-database, CostCalculator(), provider_name="openai_compatible")`; otherwise
-`completion_provider` is `None` so the application still starts without AI
-credentials. The `config`, `database`, `services`, and `providers` layers
-are infrastructure/application layers and are never imported by `core`.
-`services` and `core.providers` depend inward on `core` only — neither
-imports `database`, `httpx`, or a concrete AI SDK, which lets
-`OrderIntakeService` run against the in-memory fakes in
-`tests/workflow_fakes.py` and lets any future consumer of
-`CompletionProvider` run against `tests/provider_fakes.py`.
+database, CostCalculator(), provider_name="openai_compatible")` and
+`analysis_service = AnalysisService(transactions=..., order_intake=
+order_intake_service, provider=completion_provider, model=settings.ai_model)`;
+otherwise both `completion_provider` and `analysis_service` are `None` so the
+application still starts without AI credentials. `analysis_service` shares
+its `transactions` instance with `order_intake_service` and calls
+`order_intake_service.create_plan` directly — a same-layer, same-aggregate
+collaboration between two `services` classes, not a boundary crossing. The
+`config`, `database`, `services`, and `providers` layers are
+infrastructure/application layers and are never imported by `core`.
+`services`, `core.providers`, and `core.analysis` depend inward on `core`
+only — none of them imports `database`, `httpx`, or a concrete AI SDK, which
+lets `OrderIntakeService` and `AnalysisService` run against the in-memory
+fakes in `tests/workflow_fakes.py` and `tests/provider_fakes.py`.
 `database.workflow` and `database.provider_calls` are the two places that
 depend on both an application/core port (to implement it) and SQLAlchemy (to
 fulfil it), consistent with "adapters depend inward on services and core."
@@ -228,6 +246,55 @@ be constructed — otherwise it is `None` and the application still starts,
 matching the existing "AI settings are optional placeholders for the
 current MVP" policy.
 
+### Order analysis and task decomposition (Issue #008)
+
+`AnalysisService.analyze_order(project_id)` is the first real consumer of
+`CompletionProvider`. It is a pure orchestrator: it reads the project's
+order and open conversation, builds a bounded prompt with
+`core.analysis.build_analysis_request` (a title over 300 characters or a
+description over 6,000 characters raises `AnalysisValidationError` before
+any provider call — the "bounded" prompt this issue requires), calls the
+provider, persists the exact system/user prompt and the raw response as
+three private `messages` rows (`system`, `user`, `agent`) on the project's
+existing open conversation, parses the response with
+`core.analysis.parse_plan_response`, and delegates persistence to
+`OrderIntakeService.create_plan`. No new table or migration was needed:
+`conversations`/`messages` (Issue #005) and `project_tasks` (Issue #006)
+already covered everything this issue persists.
+
+"Reads an accepted order" does not require a new order-acceptance operation
+or status: it means a project whose `order_id` resolves to an existing
+order record. `freelance_orders.status` is unchanged by analysis (still
+`OrderStatus.OPEN` from intake); Issue #008 does not introduce an
+`OrderStatus.ACCEPTED` transition, since nothing in this issue's scope
+defines what would trigger one.
+
+The provider's response is expected to be a JSON array of
+`{"title", "description"?, "capability"?, "depends_on"?}` objects, where
+`depends_on` is a list of 0-based indices into that same array.
+`parse_plan_response` only checks the JSON shape and that dependency
+indices are in range — it assigns each task a UUID and resolves indices to
+UUIDs, then hands the result to the same
+`core.workflow.value_objects.TaskPlan.create` that `create_plan` already
+uses, so blank titles, duplicate ids, and self-referential or dangling
+dependencies are rejected exactly as they are for a manually submitted
+plan. Because `create_plan` already raises `PlanAlreadyExistsError` for a
+project with tasks, `analyze_order` checks for existing tasks itself
+*before* calling the provider, so a project that cannot accept a new plan
+never spends a provider call.
+
+**Fail-closed and retryable, by construction rather than by a status
+field.** The provider call happens outside any transaction; if it raises, no
+transaction has opened and nothing is persisted, so the order/project/
+conversation are exactly as they were and the caller may call
+`analyze_order` again. If the provider responds but parsing or plan
+validation fails, the prompt/response messages are persisted (deliberately —
+that is the audit trail needed to debug *why* it failed) but `create_plan`
+never runs, so zero `project_tasks` rows are created and a retry is still
+possible (the project still has no plan). Issue #008 therefore needs no new
+"analysis status" enum: retryability falls out of "no partial work" the same
+way Issue #006's transaction boundary already guarantees it for intake.
+
 ## Issue #001 boundary
 
 Issue #001 delivered the Python 3.13 `src` foundation, employee and company
@@ -246,9 +313,10 @@ The intended structure still reserves space for:
   grows (Issue #018).
 
 `services` for application use cases now exists as of Issue #006, scoped to
-order intake and task workflow; `providers`/`core.providers` for AI
-completions now exist as of Issue #007. Later issues extend these layers
-rather than introducing parallel ones.
+order intake and task workflow, and grew an `AnalysisService` in Issue #008;
+`providers`/`core.providers` for AI completions now exist as of Issue #007;
+`core.analysis` for order decomposition now exists as of Issue #008. Later
+issues extend these layers rather than introducing parallel ones.
 
 These layers are architectural boundaries only; Issues #001 and #002 did not
 implement them or add any of their dependencies. Issue #003 adds only the
@@ -261,5 +329,8 @@ provider credentials, decomposition, assignment, execution, approval, or any
 interface adapter. Issue #007 adds the `CompletionProvider` port, its
 OpenAI-compatible adapter, usage/cost persistence, and a fake for tests,
 without adding a business workflow that calls it, retry/queueing beyond the
-adapter's own policy, or a real pricing table — those remain scoped to
-Issues #008–#018.
+adapter's own policy, or a real pricing table. Issue #008 adds
+`AnalysisService`, `core.analysis`'s bounded-prompt and fail-closed-parse
+logic, and the `MessageRepositoryPort` extension to `WorkflowUnitOfWork`,
+without adding employee assignment, an execution worker, approval, delivery,
+or any interface adapter — those remain scoped to Issues #009–#018.

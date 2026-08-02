@@ -16,11 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from freelance_agents.core.workflow.errors import IdempotencyConflictError
 from freelance_agents.core.workflow.records import (
     ConversationRecord,
+    MessageRecord,
     OrderRecord,
     ProjectRecord,
     TaskRecord,
 )
 from freelance_agents.core.workflow.statuses import (
+    MessageRole,
     OrderIntakeStatus,
     ProjectWorkflowStatus,
     TaskStatus,
@@ -31,6 +33,7 @@ from freelance_agents.database.models import (
     ConversationModel,
     ConversationStatus,
     FreelanceOrderModel,
+    MessageModel,
     OrderStatus,
     ProjectEventType,
     ProjectModel,
@@ -38,9 +41,13 @@ from freelance_agents.database.models import (
     ProjectTaskModel,
     ProjectTaskStatus,
 )
+from freelance_agents.database.models import (
+    MessageRole as PersistedMessageRole,
+)
 from freelance_agents.database.repositories import (
     ConversationRepository,
     FreelanceOrderRepository,
+    MessageRepository,
     ProjectEventRepository,
     ProjectRepository,
     ProjectTaskRepository,
@@ -80,6 +87,17 @@ def _conversation_record(model: ConversationModel) -> ConversationRecord:
         id=model.id,
         project_id=model.project_id,
         title=model.title,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+def _message_record(model: MessageModel) -> MessageRecord:
+    return MessageRecord(
+        id=model.id,
+        conversation_id=model.conversation_id,
+        role=MessageRole(model.role.value),
+        content=model.content,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -208,6 +226,24 @@ class SqlAlchemyProjectEventRepositoryPort:
         )
 
 
+class SqlAlchemyMessageRepositoryPort:
+    """Adapt ``MessageRepository`` to the order-intake message port."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._repository = MessageRepository(session)
+
+    async def append(
+        self, conversation_id: UUID, role: MessageRole, content: str
+    ) -> MessageRecord:
+        """Persist one private message and return its record."""
+        model = await self._repository.create(
+            conversation_id=conversation_id,
+            role=PersistedMessageRole(role.value),
+            content=content,
+        )
+        return _message_record(model)
+
+
 class SqlAlchemyProjectTaskRepositoryPort:
     """Adapt ``ProjectTaskRepository`` to the order-intake task port."""
 
@@ -269,4 +305,5 @@ class SqlAlchemyWorkflowTransactionManager:
                 conversations=SqlAlchemyConversationRepositoryPort(session),
                 events=SqlAlchemyProjectEventRepositoryPort(session),
                 tasks=SqlAlchemyProjectTaskRepositoryPort(session),
+                messages=SqlAlchemyMessageRepositoryPort(session),
             )

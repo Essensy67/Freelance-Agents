@@ -13,7 +13,8 @@ from freelance_agents.database import (
 )
 from freelance_agents.logging_config import configure_logging
 from freelance_agents.providers import OpenAICompatibleProvider
-from freelance_agents.services import OrderIntakeService
+from freelance_agents.services import AnalysisService, OrderIntakeService
+from freelance_agents.services.ports import WorkflowTransactionManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +63,26 @@ class Application:
             name=self.settings.app_name,
             event_bus=self.event_bus,
         )
+        transactions: WorkflowTransactionManager = SqlAlchemyWorkflowTransactionManager(
+            self.database
+        )
         self.order_intake_service = OrderIntakeService(
-            transactions=SqlAlchemyWorkflowTransactionManager(self.database),
+            transactions=transactions,
             events=self.event_bus,
         )
         self.completion_provider = _build_completion_provider(
             self.settings, self.database
+        )
+        self.analysis_service = (
+            AnalysisService(
+                transactions=transactions,
+                order_intake=self.order_intake_service,
+                provider=self.completion_provider,
+                model=self.settings.ai_model,
+            )
+            if self.completion_provider is not None
+            and self.settings.ai_model is not None
+            else None
         )
 
     async def run(self) -> None:

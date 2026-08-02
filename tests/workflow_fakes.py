@@ -14,11 +14,13 @@ from freelance_agents.core.events.models import Event
 from freelance_agents.core.workflow.errors import IdempotencyConflictError
 from freelance_agents.core.workflow.records import (
     ConversationRecord,
+    MessageRecord,
     OrderRecord,
     ProjectRecord,
     TaskRecord,
 )
 from freelance_agents.core.workflow.statuses import (
+    MessageRole,
     OrderIntakeStatus,
     ProjectWorkflowStatus,
     TaskStatus,
@@ -36,6 +38,7 @@ class FakeWorkflowStore:
     conversations: dict[UUID, ConversationRecord] = field(default_factory=dict)
     tasks: dict[UUID, TaskRecord] = field(default_factory=dict)
     events: list[dict[str, object]] = field(default_factory=list)
+    messages: list[MessageRecord] = field(default_factory=list)
 
 
 def _now() -> datetime:
@@ -149,6 +152,26 @@ class _FakeEvents:
         )
 
 
+class _FakeMessages:
+    def __init__(self, store: FakeWorkflowStore) -> None:
+        self._store = store
+
+    async def append(
+        self, conversation_id: UUID, role: MessageRole, content: str
+    ) -> MessageRecord:
+        timestamp = _now()
+        record = MessageRecord(
+            id=uuid4(),
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        self._store.messages.append(record)
+        return record
+
+
 class _FakeTasks:
     def __init__(self, store: FakeWorkflowStore) -> None:
         self._store = store
@@ -232,6 +255,7 @@ class _FakeTransaction:
             conversations=_FakeConversations(self._staged),
             events=_FakeEvents(self._staged),
             tasks=_FakeTasks(self._staged),
+            messages=_FakeMessages(self._staged),
         )
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:

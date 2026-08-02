@@ -12,12 +12,14 @@ from freelance_agents.core.workflow.errors import (
 )
 from freelance_agents.core.workflow.records import (
     ConversationRecord,
+    MessageRecord,
     OrderRecord,
     ProjectRecord,
     TaskRecord,
 )
 from freelance_agents.core.workflow.statuses import (
     ALLOWED_TASK_TRANSITIONS,
+    MessageRole,
     OrderIntakeStatus,
     ProjectWorkflowStatus,
     TaskStatus,
@@ -34,6 +36,8 @@ __all__ = [
     "ALLOWED_TASK_TRANSITIONS",
     "ConversationRecord",
     "IdempotencyConflictError",
+    "MessageRecord",
+    "MessageRole",
     "OrderDetails",
     "OrderIntakeStatus",
     "OrderRecord",

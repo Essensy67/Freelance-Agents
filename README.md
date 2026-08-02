@@ -5,12 +5,14 @@ specialized agents. The project currently provides lifecycle models for a
 company and its employees, a small in-process event bus, asynchronous SQLite
 persistence with Alembic migrations, an `OrderIntakeService` application
 service that accepts a client order and turns it into a project with a
-validated task plan (see "Order intake and task workflow" below), and a
+validated task plan (see "Order intake and task workflow" below), a
 provider-neutral AI completion port with an OpenAI-compatible adapter and
-usage/cost persistence (see "AI completion provider" below).
+usage/cost persistence (see "AI completion provider" below), and an
+`AnalysisService` that decomposes an order into that task plan by prompting
+the AI provider (see "Order analysis and task decomposition" below).
 
 The project intentionally contains no freelance marketplace integrations,
-Telegram bot, or business workflow that calls the AI provider yet; see
+Telegram bot, employee assignment, or task execution yet; see
 `docs/tasks/ROADMAP.md` for the planned sequence.
 
 ## Requirements
@@ -99,8 +101,9 @@ future interface without that interface touching SQLAlchemy or ORM models:
   `failed`/`cancelled` reachable from any non-terminal state), rejecting
   skipped states or a mutated terminal task.
 
-This service does not call an AI provider, assign employees, execute tasks,
-or accept approvals — those are Issues #008–#011. See
+`OrderIntakeService` itself does not call an AI provider, assign employees,
+execute tasks, or accept approvals — assignment, execution, and approval are
+Issues #009–#011; task decomposition via AI is `AnalysisService`, below. See
 `docs/ARCHITECTURE.md` for the transaction boundary and status-mapping
 details.
 
@@ -108,7 +111,7 @@ details.
 
 `CompletionProvider` (`freelance_agents.core.providers`) is a provider-neutral
 async port: `async def complete(request: CompletionRequest) -> CompletionResponse`.
-No business workflow calls it yet (Issue #008 is the first consumer), and no
+`AnalysisService` (below) is its first business-workflow consumer, and no
 service or core type imports `httpx` or an AI SDK to define it.
 
 `OpenAICompatibleProvider` (`freelance_agents.providers`) is the first
@@ -132,6 +135,36 @@ of current rates. An unpriced model yields `estimated_cost=None` rather than
 a guess. Tests use `tests/provider_fakes.FakeCompletionProvider` — a
 `CompletionProvider` double that returns a canned response or raises a
 canned `ProviderError` — instead of making real HTTP calls.
+
+## Order analysis and task decomposition
+
+`AnalysisService.analyze_order(project_id)` (`freelance_agents.services`,
+available as `Application.analysis_service` when AI settings are configured)
+turns an order into a validated, persisted task plan:
+
+1. Reads the project's order and open conversation; rejects an unknown
+   project, a project with no order, or one that already has a plan
+   (`PlanAlreadyExistsError`) — all before spending a provider call.
+2. Builds a bounded prompt (`core.analysis.build_analysis_request`): an order
+   title over 300 characters or a description over 6,000 characters raises
+   `AnalysisValidationError` instead of being sent.
+3. Sends it through `CompletionProvider` and persists the exact prompt and
+   raw response as three private `system`/`user`/`agent` messages on the
+   project's conversation — the private audit trail this issue requires.
+4. Parses the response (`core.analysis.parse_plan_response`), expecting a
+   JSON array of `{"title", "description"?, "capability"?, "depends_on"?}`
+   objects with 0-based `depends_on` indices into that array; anything else
+   raises `AnalysisResponseError`.
+5. Delegates persistence to `OrderIntakeService.create_plan`, so the parsed
+   plan is validated, stored, and published (`plan.created`) through the
+   exact same path as a manually submitted plan.
+
+This is fail-closed and retryable by construction, not by a status field: the
+provider call happens outside any transaction, so a provider error leaves
+nothing persisted; a malformed response or invalid plan still persists the
+audit messages (so a failed attempt is debuggable) but creates zero tasks.
+Either way the project still has no plan afterward, so `analyze_order` may
+simply be called again. See `docs/ARCHITECTURE.md` for the full contract.
 
 Apply the versioned schema migration with:
 
@@ -175,14 +208,15 @@ src/freelance_agents/
 │                          # the workflow ports adapter, and the provider
 │                          # call recorder
 ├── logging_config.py    # standard logging setup
-├── services/               # OrderIntakeService, ports, and DTOs
+├── services/               # OrderIntakeService, AnalysisService, ports, DTOs
 ├── providers/               # OpenAI-compatible completion adapter
 └── core/
     ├── company.py       # company aggregate
     ├── employees/       # employee model and status
     ├── events/          # event model and asynchronous event bus
     ├── workflow/          # order-intake and task-lifecycle domain types
-    └── providers/          # completion port, normalized types, cost calculator
+    ├── providers/          # completion port, normalized types, cost calculator
+    └── analysis/           # bounded prompt builder and plan-response parser
 tests/                   # unit tests
 docs/tasks/              # task scope and acceptance criteria
 migrations/              # Alembic schema revisions

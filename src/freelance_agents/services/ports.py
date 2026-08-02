@@ -16,11 +16,12 @@ from uuid import UUID
 from freelance_agents.core.events.models import Event
 from freelance_agents.core.workflow.records import (
     ConversationRecord,
+    MessageRecord,
     OrderRecord,
     ProjectRecord,
     TaskRecord,
 )
-from freelance_agents.core.workflow.statuses import TaskStatus
+from freelance_agents.core.workflow.statuses import MessageRole, TaskStatus
 from freelance_agents.core.workflow.value_objects import OrderDetails, TaskDraft
 
 
@@ -75,6 +76,15 @@ class ProjectEventRepositoryPort(Protocol):
         """Persist an intake event linking an order, project, and conversation."""
 
 
+class MessageRepositoryPort(Protocol):
+    """Append private conversation messages within one transaction."""
+
+    async def append(
+        self, conversation_id: UUID, role: MessageRole, content: str
+    ) -> MessageRecord:
+        """Persist one private message and return its record."""
+
+
 class ProjectTaskRepositoryPort(Protocol):
     """Persist and retrieve project task records within one transaction."""
 
@@ -102,6 +112,7 @@ class WorkflowUnitOfWork:
     conversations: ConversationRepositoryPort
     events: ProjectEventRepositoryPort
     tasks: ProjectTaskRepositoryPort
+    messages: MessageRepositoryPort
 
 
 class WorkflowTransactionManager(Protocol):

@@ -48,6 +48,14 @@ class ProjectWorkflowStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class MessageRole(StrEnum):
+    """Core-facing mirror of the persisted conversation-message role."""
+
+    USER = "user"
+    AGENT = "agent"
+    SYSTEM = "system"
+
+
 _TERMINAL_STATUSES = frozenset(
     {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 )

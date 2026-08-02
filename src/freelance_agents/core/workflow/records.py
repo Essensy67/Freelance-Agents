@@ -10,6 +10,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from freelance_agents.core.workflow.statuses import (
+    MessageRole,
     OrderIntakeStatus,
     ProjectWorkflowStatus,
     TaskStatus,
@@ -50,6 +51,18 @@ class ConversationRecord:
     id: UUID
     project_id: UUID | None
     title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class MessageRecord:
+    """One persisted, private conversation message."""
+
+    id: UUID
+    conversation_id: UUID
+    role: MessageRole
+    content: str
     created_at: datetime
     updated_at: datetime
 

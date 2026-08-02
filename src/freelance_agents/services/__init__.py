@@ -1,5 +1,6 @@
 """Transport-neutral application services."""
 
+from freelance_agents.services.analysis import AnalysisService
 from freelance_agents.services.dto import (
     OrderIntakeCommand,
     OrderIntakeResult,
@@ -11,6 +12,7 @@ from freelance_agents.services.order_intake import OrderIntakeService
 from freelance_agents.services.ports import (
     ConversationRepositoryPort,
     EventPublisherPort,
+    MessageRepositoryPort,
     OrderRepositoryPort,
     ProjectEventRepositoryPort,
     ProjectRepositoryPort,
@@ -20,8 +22,10 @@ from freelance_agents.services.ports import (
 )
 
 __all__ = [
+    "AnalysisService",
     "ConversationRepositoryPort",
     "EventPublisherPort",
+    "MessageRepositoryPort",
     "OrderIntakeCommand",
     "OrderIntakeResult",
     "OrderIntakeService",
